@@ -7,7 +7,6 @@ import org.gradle.api.file.FileCollection;
 import javax.inject.Inject;
 import java.io.File;
 import java.io.IOException;
-import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.URL;
@@ -66,20 +65,18 @@ public class SkidfuscatorCompileAction implements Action<Task> {
     }
 
     private Object buildSkidfuscatorSession(Class<?> aClass) throws NoSuchMethodException, InvocationTargetException, InstantiationException, IllegalAccessException {
-        Constructor<?> constructor = aClass.getDeclaredConstructor(
-                File.class, // input
-                File.class, // output
-                File[].class, // libs
-                File.class, // mappings
-                File.class, // exempt
-                File.class, // runtime
-                boolean.class, // phantom
-                boolean.class, // jmod
-                boolean.class, // fuckit
-                boolean.class // analytics
-        );
-        return constructor.newInstance(
-                spec.getInput(), spec.getOutput(), spec.getLibs(), spec.getMappings(), spec.getExempt(), spec.getRuntime(),
-                spec.isPhantom(), spec.isJmod(), spec.isFuckit(), spec.isAnalytics());
+        Object builder = aClass.getMethod("builder").invoke(null);
+        Class<?> builderClass = builder.getClass();
+        builderClass.getMethod("input", File.class).invoke(builder, spec.getInput());
+        builderClass.getMethod("output", File.class).invoke(builder, spec.getOutput());
+        builderClass.getMethod("libs", File[].class).invoke(builder, (Object) spec.getLibs());
+        builderClass.getMethod("mappings", File.class).invoke(builder, spec.getMappings());
+        builderClass.getMethod("exempt", File.class).invoke(builder, spec.getExempt());
+        builderClass.getMethod("runtime", File.class).invoke(builder, spec.getRuntime());
+        builderClass.getMethod("phantom", boolean.class).invoke(builder, spec.isPhantom());
+        builderClass.getMethod("jmod", boolean.class).invoke(builder, spec.isJmod());
+        builderClass.getMethod("fuckit", boolean.class).invoke(builder, spec.isFuckit());
+        builderClass.getMethod("analytics", boolean.class).invoke(builder, spec.isAnalytics());
+        return builderClass.getMethod("build").invoke(builder);
     }
 }
