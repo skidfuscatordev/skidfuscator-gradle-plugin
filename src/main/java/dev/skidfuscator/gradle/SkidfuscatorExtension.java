@@ -1,51 +1,65 @@
 package dev.skidfuscator.gradle;
 
-import lombok.Getter;
-import org.gradle.api.file.RegularFileProperty;
-import org.gradle.api.model.ObjectFactory;
-import org.gradle.api.provider.ListProperty;
-import org.gradle.api.provider.Property;
+import org.gradle.api.NamedDomainObjectContainer;
 
-import javax.inject.Inject;
+import java.util.ArrayList;
+import java.util.List;
 
-@Getter
 public class SkidfuscatorExtension {
+    private List<String> exempt = new ArrayList<>();
+    private List<String> libs = new ArrayList<>();
 
-    private final Property<String> version;
-    private final Property<Boolean> phantom;
-    private final Property<Boolean> notrack;
-    private final Property<Boolean> fuckit;
-    private final Property<String> classifier;
-    private final ListProperty<String> excludes;
-    private final RegularFileProperty runtime;
-    private final RegularFileProperty exemptionFile;
+    // Dynamic transformers container
+    private final TransformersExtension transformersExtension;
 
-    @Inject
-    public SkidfuscatorExtension(ObjectFactory objectFactory) {
-        this.version = objectFactory.property(String.class).convention("2.0.0-SNAPSHOT"); // automatically fetching?
-        this.phantom = objectFactory.property(Boolean.class).convention(false);
-        this.notrack = objectFactory.property(Boolean.class).convention(false);
-        this.fuckit = objectFactory.property(Boolean.class).convention(false);
-        this.runtime = objectFactory.fileProperty();
-        this.classifier = objectFactory.property(String.class).convention("-obfuscated");
-        this.excludes = objectFactory.listProperty(String.class).empty();
-        this.exemptionFile = objectFactory.fileProperty();
+    private boolean phantom = false;
+    private boolean fuckit = false;
+    private boolean debug = false;
+    private boolean notrack = false;
+    private String runtime = null;
+    private String output = null;
+    private String configFileName = "skidfuscator.conf";
+    private String skidfuscatorVersion = "latest";
+
+    public SkidfuscatorExtension(NamedDomainObjectContainer<TransformerSpec> transformersContainer) {
+        this.transformersExtension = new TransformersExtension(transformersContainer);
     }
 
-    public void exclude(String... exludes) {
-        this.excludes.addAll(exludes);
+    public List<String> getExempt() { return exempt; }
+    public void setExempt(List<String> exempt) { this.exempt = exempt; }
+
+    public List<String> getLibs() { return libs; }
+    public void setLibs(List<String> libs) { this.libs = libs; }
+
+    public TransformersExtension getTransformers() {
+        return transformersExtension;
     }
 
-    public void phantom() {
-        this.phantom.set(true);
+    public void transformers(org.gradle.api.Action<? super NamedDomainObjectContainer<TransformerSpec>> action) {
+        this.transformersExtension.transformers(action);
     }
 
-    public void notrack() {
-        this.notrack.set(true);
-    }
+    public boolean isPhantom() { return phantom; }
+    public void setPhantom(boolean phantom) { this.phantom = phantom; }
 
-    public void fuckit() {
-        this.fuckit.set(true);
-    }
+    public boolean isFuckit() { return fuckit; }
+    public void setFuckit(boolean fuckit) { this.fuckit = fuckit; }
 
+    public boolean isDebug() { return debug; }
+    public void setDebug(boolean debug) { this.debug = debug; }
+
+    public boolean isNotrack() { return notrack; }
+    public void setNotrack(boolean notrack) { this.notrack = notrack; }
+
+    public String getRuntime() { return runtime; }
+    public void setRuntime(String runtime) { this.runtime = runtime; }
+
+    public String getOutput() { return output; }
+    public void setOutput(String output) { this.output = output; }
+
+    public String getConfigFileName() { return configFileName; }
+    public void setConfigFileName(String configFileName) { this.configFileName = configFileName; }
+
+    public String getSkidfuscatorVersion() { return skidfuscatorVersion; }
+    public void setSkidfuscatorVersion(String skidfuscatorVersion) { this.skidfuscatorVersion = skidfuscatorVersion; }
 }

@@ -3,6 +3,7 @@ plugins {
     id 'java-library'
     id 'java-gradle-plugin'
     id 'com.gradle.plugin-publish' version '0.14.0'
+    id 'maven-publish'
 }
 
 group = 'dev.skidfuscator'
@@ -12,7 +13,7 @@ gradlePlugin {
     plugins {
         skidfuscator {
             id = 'dev.skidfuscator'
-            implementationClass = 'dev.skidfuscator.gradle.SkidfuscatorGradlePlugin'
+            implementationClass = 'dev.skidfuscator.gradle.SkidfuscatorPlugin'
         }
     }
 }
@@ -42,8 +43,18 @@ dependencies {
     compileOnly 'org.projectlombok:lombok:1.18.24'
     annotationProcessor 'org.projectlombok:lombok:1.18.24'
 
+    implementation 'com.typesafe:config:1.4.3'
+
     compileOnly gradleApi()
     compileOnly 'org.codehaus.groovy:groovy-all:3.0.9'
 
     implementation 'commons-io:commons-io:2.11.0'
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+        }
+    }
 }
