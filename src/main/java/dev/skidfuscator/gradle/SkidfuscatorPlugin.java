@@ -33,7 +33,52 @@ public class SkidfuscatorPlugin implements Plugin<Project> {
                 return;
             }
 
+            // Add new task to collect dependencies
+            Task collectDependencies = p.getTasks().create("collectSkidfuscatorDependencies", task -> {
+                task.doLast(t -> {
+                    File depsDir = new File(p.getBuildDir(), "skidfuscator/dependencies");
+                    if (!depsDir.exists()) {
+                        depsDir.mkdirs();
+                    }
+
+                    // Clear existing files
+                    Arrays.stream(depsDir.listFiles()).forEach(File::delete);
+
+                    // Collect all runtime dependencies
+                    Set<File> deps = p.getConfigurations().getByName("compileClasspath")
+                            .getResolvedConfiguration()
+                            .getResolvedArtifacts()
+                            .stream()
+                            .map(artifact -> artifact.getFile())
+                            .collect(Collectors.toSet());
+
+                    // Copy dependencies to the deps directory
+                    for (File dep : deps) {
+                        try {
+                            File destFile = new File(depsDir, dep.getName());
+                            java.nio.file.Files.copy(
+                                dep.toPath(),
+                                destFile.toPath(),
+                                java.nio.file.StandardCopyOption.REPLACE_EXISTING
+                            );
+                        } catch (IOException e) {
+                            project.getLogger().warn("Failed to copy dependency: " + dep.getName(), e);
+                        }
+                    }
+
+                    // Add all dependency paths to the extension's libs
+                    extension.getLibs().addAll(
+                        Arrays.stream(depsDir.listFiles())
+                            .map(File::getAbsolutePath)
+                            .collect(Collectors.toList())
+                    );
+                });
+            });
+
             finalTask.doLast(task -> {
+                // Run the collect dependencies task first
+                collectDependencies.getActions().forEach(action -> action.execute(task));
+
                 File skidDir = new File(p.getBuildDir(), "skidfuscator");
                 if (!skidDir.exists()) {
                     skidDir.mkdirs();
@@ -106,12 +151,11 @@ public class SkidfuscatorPlugin implements Plugin<Project> {
                     }
                 }
 
-                for (String lib : extension.getLibs()) {
-                    File libFile = new File(lib);
-                    if (libFile.exists()) {
-                        args.add("-li");
-                        args.add(libFile.getAbsolutePath());
-                    }
+                // Add the dependencies directory as the single libs folder
+                File depsDir = new File(p.getBuildDir(), "skidfuscator/dependencies");
+                if (depsDir.exists() && depsDir.listFiles().length > 0) {
+                    args.add("-li");
+                    args.add(depsDir.getAbsolutePath());
                 }
 
                 // Input jar last

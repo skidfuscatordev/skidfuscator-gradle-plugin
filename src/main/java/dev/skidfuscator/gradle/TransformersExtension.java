@@ -3,7 +3,7 @@ package dev.skidfuscator.gradle;
 import org.gradle.api.NamedDomainObjectContainer;
 
 /**
- * The TransformersExtension holds a NamedDomainObjectContainer<TransformerSpec>,
+ * The TransformersExtension holds a NamedDomainObjectContainer TransformerSpec,
  * allowing dynamic creation of transformers.
  */
 public class TransformersExtension {
