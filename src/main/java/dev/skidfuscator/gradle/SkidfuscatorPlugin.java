@@ -4,20 +4,27 @@ import com.typesafe.config.Config;
 import com.typesafe.config.ConfigFactory;
 import com.typesafe.config.ConfigRenderOptions;
 import com.typesafe.config.ConfigValueFactory;
+import dev.skidfuscator.dependanalysis.DependencyAnalyzer;
+import dev.skidfuscator.dependanalysis.DependencyResult;
 import org.gradle.api.NamedDomainObjectContainer;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
 import org.gradle.api.Task;
+import org.gradle.jvm.tasks.Jar;
+import org.jetbrains.annotations.NotNull;
 
 import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.stream.Collectors;
 
 public class SkidfuscatorPlugin implements Plugin<Project> {
     @Override
-    public void apply(Project project) {
+    public void apply(@NotNull Project project) {
+        this.addExclude(project);
+
         NamedDomainObjectContainer<TransformerSpec> transformerContainer =
                 project.getObjects().domainObjectContainer(TransformerSpec.class, name -> new TransformerSpec(name));
 
@@ -52,6 +59,10 @@ public class SkidfuscatorPlugin implements Plugin<Project> {
                             .map(artifact -> artifact.getFile())
                             .collect(Collectors.toSet());
 
+                    // Log the initial list of dependencies
+                    project.getLogger().lifecycle("Initial dependencies collected (" + deps.size() + "):");
+                    deps.forEach(dep -> project.getLogger().lifecycle(" - " + dep.getAbsolutePath()));
+
                     // Copy dependencies to the deps directory
                     for (File dep : deps) {
                         try {
@@ -65,13 +76,6 @@ public class SkidfuscatorPlugin implements Plugin<Project> {
                             project.getLogger().warn("Failed to copy dependency: " + dep.getName(), e);
                         }
                     }
-
-                    // Add all dependency paths to the extension's libs
-                    extension.getLibs().addAll(
-                        Arrays.stream(depsDir.listFiles())
-                            .map(File::getAbsolutePath)
-                            .collect(Collectors.toList())
-                    );
                 });
             });
 
@@ -95,10 +99,13 @@ public class SkidfuscatorPlugin implements Plugin<Project> {
                 File versionFile = new File(skidDir, ".version");
                 String currentVersion = readVersionFile(versionFile);
 
-                File skidJar = new File(skidDir, "skidfuscator-" + resolvedVersion + ".jar");
-
+                File skidJar = new File(p.getProjectDir(), ".skidfuscator/skidfuscator-" + resolvedVersion + ".jar");
+                if (!skidJar.getParentFile().exists()) {
+                    skidJar.getParentFile().mkdirs();
+                }
                 // If version changed or jar not present, re-download
-                if (!resolvedVersion.equals(currentVersion) || !skidJar.exists()) {
+                if (!"dev".equalsIgnoreCase(resolvedVersion) && resolvedVersion.equals(currentVersion) || !skidJar.exists()) {
+                    project.getLogger().warn("Could not find Skidfuscator jar at " + skidJar.getAbsolutePath() + ", downloading...");
                     project.getLogger().lifecycle("Downloading Skidfuscator " + resolvedVersion + "...");
                     try {
                         downloadSkidfuscatorJar(resolvedVersion, skidJar);
@@ -107,14 +114,6 @@ public class SkidfuscatorPlugin implements Plugin<Project> {
                         project.getLogger().error("Failed to download Skidfuscator: " + e.getMessage(), e);
                         return;
                     }
-                }
-
-                File configFile = new File(skidDir, extension.getConfigFileName());
-                try {
-                    writeHoconConfig(extension, configFile);
-                } catch (IOException e) {
-                    project.getLogger().error("Failed to write config file: " + e.getMessage(), e);
-                    return;
                 }
 
                 File outputJar;
@@ -129,6 +128,53 @@ public class SkidfuscatorPlugin implements Plugin<Project> {
                     return;
                 }
 
+                // Add the dependencies directory as the single libs folder
+                File depsDir = new File(p.getBuildDir(), "skidfuscator/dependencies");
+                if (depsDir.exists() && depsDir.listFiles().length > 0) {
+                    final List<String> reduced = new ArrayList<>();
+                    final DependencyAnalyzer analyzer = new DependencyAnalyzer(
+                            outputJar.toPath(),
+                            depsDir.toPath()
+                    );
+
+                    try {
+                        final DependencyResult result = analyzer.analyze();
+                        for(DependencyResult.JarDependency jarDependency : result.getJarDependencies()) {
+                            project.getLogger().lifecycle("JAR: " + jarDependency.getJarPath().getFileName());
+                            project.getLogger().lifecycle("---------------------------------------------------");
+
+                            for(DependencyResult.ClassDependency classDep : jarDependency.getClassesNeeded()) {
+                                project.getLogger().lifecycle("  Class: " + classDep.getClassName());
+
+                                for(String reason : classDep.getReasons()) {
+                                    project.getLogger().lifecycle("    - " + reason);
+                                }
+                            }
+
+                            project.getLogger().lifecycle("");
+                        }
+                        project.getLogger().lifecycle("Reducing dependencies...");
+                        reduced.addAll(result.getJarDependencies().stream()
+                                .map(DependencyResult.JarDependency::getJarPath)
+                                .map(Path::toString)
+                                .collect(Collectors.toList()));
+                        project.getLogger().lifecycle("Reduced dependencies (" + reduced.size() + "):");
+                    } catch (IOException e) {
+                        project.getLogger().error("Failed to minimize analyzed dependencies: " + e.getMessage(), e);
+                        return;
+                    }
+
+                    extension.getLibs().addAll(reduced);
+                }
+
+                File configFile = new File(skidDir, extension.getConfigFileName());
+                try {
+                    writeHoconConfig(extension, configFile);
+                } catch (IOException e) {
+                    project.getLogger().error("Failed to write config file: " + e.getMessage(), e);
+                    return;
+                }
+
                 File resultJar = (extension.getOutput() != null)
                         ? new File(extension.getOutput())
                         : new File(outputJar.getParentFile(), outputJar.getName().replace(".jar", "-obf.jar"));
@@ -137,6 +183,7 @@ public class SkidfuscatorPlugin implements Plugin<Project> {
                 args.add("obfuscate");
                 args.add("-cfg"); args.add(configFile.getAbsolutePath());
                 args.add("-o"); args.add(resultJar.getAbsolutePath());
+                args.add("--debug");
 
                 if (extension.isPhantom()) args.add("-ph");
                 if (extension.isFuckit()) args.add("-fuckit");
@@ -149,13 +196,6 @@ public class SkidfuscatorPlugin implements Plugin<Project> {
                         args.add("-rt");
                         args.add(rt.getAbsolutePath());
                     }
-                }
-
-                // Add the dependencies directory as the single libs folder
-                File depsDir = new File(p.getBuildDir(), "skidfuscator/dependencies");
-                if (depsDir.exists() && depsDir.listFiles().length > 0) {
-                    args.add("-li");
-                    args.add(depsDir.getAbsolutePath());
                 }
 
                 // Input jar last
@@ -232,7 +272,7 @@ public class SkidfuscatorPlugin implements Plugin<Project> {
     private Config buildConfig(SkidfuscatorExtension ext) {
         Map<String, Object> rootMap = new HashMap<>();
         rootMap.put("exempt", ext.getExempt());
-        rootMap.put("libs", ext.getLibs());
+        rootMap.put("libraries", ext.getLibs());
 
         // Dynamically add transformers
         Map<String, Object> transformerMap = new HashMap<>();
@@ -260,5 +300,38 @@ public class SkidfuscatorPlugin implements Plugin<Project> {
         try (FileWriter fw = new FileWriter(versionFile)) {
             fw.write(version);
         } catch (IOException ignored) {}
+    }
+
+    private void addExclude(final Project project) {
+        // Add gitignore handling at plugin application time
+        File gitignore = new File(project.getRootDir(), ".gitignore");
+        try {
+            // Check if .skidfuscator is already in .gitignore
+            boolean needsEntry = true;
+            if (gitignore.exists()) {
+                try (BufferedReader reader = new BufferedReader(new FileReader(gitignore))) {
+                    if (reader.lines().anyMatch(line -> line.trim().equals(".skidfuscator"))) {
+                        needsEntry = false;
+                    }
+                }
+            }
+
+            // Append .skidfuscator to .gitignore if needed
+            if (needsEntry) {
+                try (FileWriter writer = new FileWriter(gitignore, true)) {
+                    // Add newline if file exists and doesn't end with one
+                    if (gitignore.exists() && gitignore.length() > 0) {
+                        String content = new String(java.nio.file.Files.readAllBytes(gitignore.toPath()));
+                        if (!content.endsWith("\n")) {
+                            writer.write("\n");
+                        }
+                    }
+                    writer.write(".skidfuscator\n");
+                }
+                project.getLogger().lifecycle("Added .skidfuscator to .gitignore");
+            }
+        } catch (IOException e) {
+            project.getLogger().warn("Failed to update .gitignore: " + e.getMessage());
+        }
     }
 }
